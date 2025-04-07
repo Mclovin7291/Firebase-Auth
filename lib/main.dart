@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
+import 'screens/profile_screen.dart';
+import 'services/auth_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,51 +21,64 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Firebase Auth Demo',
-      home: MyHomePage(title: 'Firebase Auth Demo'),
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
+      ),
+      initialRoute: '/',
+      routes: {
+        '/': (context) => AuthenticationScreen(),
+        '/profile': (context) => ProfileScreen(),
+      },
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-  final String title;
+class AuthenticationScreen extends StatefulWidget {
+  const AuthenticationScreen({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<AuthenticationScreen> createState() => _AuthenticationScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+class _AuthenticationScreenState extends State<AuthenticationScreen> {
+  final AuthService _authService = AuthService();
+  bool _isLogin = true;
 
-  void _signOut() async {
-    await _auth.signOut();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Signed out successfully'),
-        ),
-      );
-    }
+  @override
+  void initState() {
+    super.initState();
+    _authService.authStateChanges.listen((User? user) {
+      if (user != null) {
+        Navigator.of(context).pushReplacementNamed('/profile');
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.title),
-        actions: <Widget>[
-          ElevatedButton(
-            onPressed: _signOut,
-            child: const Text('Sign Out'),
-          ),
-        ],
+        title: Text(_isLogin ? 'Login' : 'Register'),
       ),
-      body: Center(
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            RegisterEmailSection(auth: _auth),
-            EmailPasswordForm(auth: _auth),
+          children: [
+            _isLogin
+                ? LoginForm(authService: _authService)
+                : RegisterForm(authService: _authService),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _isLogin = !_isLogin;
+                });
+              },
+              child: Text(_isLogin
+                  ? 'Need an account? Register'
+                  : 'Already have an account? Login'),
+            ),
           ],
         ),
       ),
@@ -71,38 +86,40 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }
 
-class RegisterEmailSection extends StatefulWidget {
-  const RegisterEmailSection({super.key, required this.auth});
-  final FirebaseAuth auth;
+class LoginForm extends StatefulWidget {
+  final AuthService authService;
+
+  const LoginForm({super.key, required this.authService});
 
   @override
-  State<RegisterEmailSection> createState() => _RegisterEmailSectionState();
+  State<LoginForm> createState() => _LoginFormState();
 }
 
-class _RegisterEmailSectionState extends State<RegisterEmailSection> {
-  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  bool _success = false;
-  bool _initialState = true;
-  String? _userEmail;
+class _LoginFormState extends State<LoginForm> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  String? _errorMessage;
 
-  void _register() async {
-    try {
-      await widget.auth.createUserWithEmailAndPassword(
-        email: _emailController.text,
-        password: _passwordController.text,
-      );
-      setState(() {
-        _success = true;
-        _userEmail = _emailController.text;
-        _initialState = false;
-      });
-    } catch (e) {
-      setState(() {
-        _success = false;
-        _initialState = false;
-      });
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _signIn() async {
+    if (_formKey.currentState!.validate()) {
+      try {
+        await widget.authService.signInWithEmailAndPassword(
+          _emailController.text,
+          _passwordController.text,
+        );
+      } catch (e) {
+        setState(() {
+          _errorMessage = e.toString();
+        });
+      }
     }
   }
 
@@ -111,14 +128,17 @@ class _RegisterEmailSectionState extends State<RegisterEmailSection> {
     return Form(
       key: _formKey,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
+        children: [
           TextFormField(
             controller: _emailController,
             decoration: const InputDecoration(labelText: 'Email'),
+            keyboardType: TextInputType.emailAddress,
             validator: (value) {
-              if (value?.isEmpty ?? true) {
-                return 'Please enter some text';
+              if (value == null || value.isEmpty) {
+                return 'Please enter your email';
+              }
+              if (!value.contains('@')) {
+                return 'Please enter a valid email';
               }
               return null;
             },
@@ -126,37 +146,29 @@ class _RegisterEmailSectionState extends State<RegisterEmailSection> {
           TextFormField(
             controller: _passwordController,
             decoration: const InputDecoration(labelText: 'Password'),
+            obscureText: true,
             validator: (value) {
-              if (value?.isEmpty ?? true) {
-                return 'Please enter some text';
+              if (value == null || value.isEmpty) {
+                return 'Please enter your password';
+              }
+              if (value.length < 6) {
+                return 'Password must be at least 6 characters';
               }
               return null;
             },
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 16.0),
-            alignment: Alignment.center,
-            child: ElevatedButton(
-              onPressed: () {
-                if (_formKey.currentState!.validate()) {
-                  _register();
-                }
-              },
-              child: const Text('Submit'),
-            ),
-          ),
-          Container(
-            alignment: Alignment.center,
-            child: Text(
-              _initialState
-                  ? 'Please Register'
-                  : _success
-                      ? 'Successfully registered $_userEmail'
-                      : 'Registration failed',
-              style: TextStyle(
-                color: _success ? Colors.green : Colors.red,
+          if (_errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Text(
+                _errorMessage!,
+                style: const TextStyle(color: Colors.red),
               ),
             ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _signIn,
+            child: const Text('Sign In'),
           ),
         ],
       ),
@@ -164,38 +176,40 @@ class _RegisterEmailSectionState extends State<RegisterEmailSection> {
   }
 }
 
-class EmailPasswordForm extends StatefulWidget {
-  const EmailPasswordForm({super.key, required this.auth});
-  final FirebaseAuth auth;
+class RegisterForm extends StatefulWidget {
+  final AuthService authService;
+
+  const RegisterForm({super.key, required this.authService});
 
   @override
-  State<EmailPasswordForm> createState() => _EmailPasswordFormState();
+  State<RegisterForm> createState() => _RegisterFormState();
 }
 
-class _EmailPasswordFormState extends State<EmailPasswordForm> {
-  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  bool _success = false;
-  bool _initialState = true;
-  String _userEmail = '';
+class _RegisterFormState extends State<RegisterForm> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  String? _errorMessage;
 
-  void _signInWithEmailAndPassword() async {
-    try {
-      await widget.auth.signInWithEmailAndPassword(
-        email: _emailController.text,
-        password: _passwordController.text,
-      );
-      setState(() {
-        _success = true;
-        _userEmail = _emailController.text;
-        _initialState = false;
-      });
-    } catch (e) {
-      setState(() {
-        _success = false;
-        _initialState = false;
-      });
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _register() async {
+    if (_formKey.currentState!.validate()) {
+      try {
+        await widget.authService.registerWithEmailAndPassword(
+          _emailController.text,
+          _passwordController.text,
+        );
+      } catch (e) {
+        setState(() {
+          _errorMessage = e.toString();
+        });
+      }
     }
   }
 
@@ -204,19 +218,17 @@ class _EmailPasswordFormState extends State<EmailPasswordForm> {
     return Form(
       key: _formKey,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Container(
-            padding: const EdgeInsets.all(16),
-            alignment: Alignment.center,
-            child: const Text('Test sign in with email and password'),
-          ),
+        children: [
           TextFormField(
             controller: _emailController,
             decoration: const InputDecoration(labelText: 'Email'),
+            keyboardType: TextInputType.emailAddress,
             validator: (value) {
-              if (value?.isEmpty ?? true) {
-                return 'Please enter some text';
+              if (value == null || value.isEmpty) {
+                return 'Please enter your email';
+              }
+              if (!value.contains('@')) {
+                return 'Please enter a valid email';
               }
               return null;
             },
@@ -224,38 +236,29 @@ class _EmailPasswordFormState extends State<EmailPasswordForm> {
           TextFormField(
             controller: _passwordController,
             decoration: const InputDecoration(labelText: 'Password'),
+            obscureText: true,
             validator: (value) {
-              if (value?.isEmpty ?? true) {
-                return 'Please enter some text';
+              if (value == null || value.isEmpty) {
+                return 'Please enter your password';
+              }
+              if (value.length < 6) {
+                return 'Password must be at least 6 characters';
               }
               return null;
             },
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 16.0),
-            alignment: Alignment.center,
-            child: ElevatedButton(
-              onPressed: () {
-                if (_formKey.currentState!.validate()) {
-                  _signInWithEmailAndPassword();
-                }
-              },
-              child: const Text('Submit'),
-            ),
-          ),
-          Container(
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              _initialState
-                  ? 'Please sign in'
-                  : _success
-                      ? 'Successfully signed in $_userEmail'
-                      : 'Sign in failed',
-              style: TextStyle(
-                color: _success ? Colors.green : Colors.red,
+          if (_errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Text(
+                _errorMessage!,
+                style: const TextStyle(color: Colors.red),
               ),
             ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _register,
+            child: const Text('Register'),
           ),
         ],
       ),
