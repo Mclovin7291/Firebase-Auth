@@ -44,6 +44,33 @@ class AuthService {
     await _auth.signOut();
   }
 
+  // Change password
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    try {
+      // Get current user
+      final user = _auth.currentUser;
+      if (user == null) throw 'No user logged in';
+      
+      // Get user credentials
+      final email = user.email;
+      if (email == null) throw 'User has no email';
+
+      // Reauthenticate user before changing password
+      final credential = EmailAuthProvider.credential(
+        email: email,
+        password: currentPassword,
+      );
+      await user.reauthenticateWithCredential(credential);
+      
+      // Change password
+      await user.updatePassword(newPassword);
+    } on FirebaseAuthException catch (e) {
+      throw _handleAuthException(e);
+    } catch (e) {
+      throw e.toString();
+    }
+  }
+
   // Handle authentication exceptions
   String _handleAuthException(FirebaseAuthException e) {
     switch (e.code) {
